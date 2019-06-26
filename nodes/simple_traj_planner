@@ -13,13 +13,12 @@ from tf.transformations import euler_from_quaternion,quaternion_about_axis
 
 tl=None
 
-REFERENCE_FRAME="sandtray"
+REFERENCE_FRAME="map"
 MIN_TH = 5
-
 
 class Planner:
     def __init__(self):
-        self._sub = rospy.Subscriber("/map", OccupancyGrid, self.on_map)
+        self._sub = rospy.Subscriber("/occupancy_grid", OccupancyGrid, self.on_map)
         self._pub_plan = rospy.Publisher("/plan", Path, queue_size=1)
         self._pub_av_p = rospy.Publisher("/avoidance_point", PoseStamped, queue_size=1)
         self._br = tf.TransformBroadcaster()
@@ -35,7 +34,7 @@ class Planner:
         self._rob_x = None
         self._rob_y = None
         self._rob_theta = None
-        self._rob_r = .01
+        self._rob_r = .25
         self._need_plan = True
         self._grid = None
 
@@ -54,7 +53,7 @@ class Planner:
         for i in range(self._width):
             for j in range(self._height):
                 self._grid[i][j]=msg.data[j*self._width+i]
-        
+
         self.plan()
     
     def get_pose2D(self, frame_id):
@@ -79,7 +78,6 @@ class Planner:
         return pose
 
     def plan(self):
-        print "Planning"
         rob_pose = self.get_pose2D("base_link")
         hum_pose = self.get_pose2D("human")
         goal_pose = self.get_pose2D("goal")
@@ -93,15 +91,15 @@ class Planner:
         av_pose_position = [av_point.x*self._resolution+self._origin_x, av_point.y*self._resolution+self._origin_y,0]
         av_pose_rotation = quaternion_about_axis(hum_pose.theta,(0,1,0))
 
-        self._br.sendTransform(av_pose_position, av_pose_rotation,rospy.Time.now(),"avoidance_point",REFERENCE_FRAME)
+        self._br.sendTransform(av_pose_position, av_pose_rotation,rospy.Time.now(),"avoidance_point","map")
 
 
         path = Path()
-        path.header.frame_id=REFERENCE_FRAME
+        path.header.frame_id="map"
         path.header.stamp = rospy.Time.now()+rospy.Duration.from_sec(1.)
 
-        points_step = self.get_side_step(rob_pose,hum_pose,goal_pose)
-        points_avoidance = self.get_avoidance(rob_pose,hum_pose,goal_pose, points_step[-1], av_point)
+        points_step = self.get_side_step(rob_pose,hum_pose)
+        points_avoidance = self.get_avoidance(rob_pose, points_step[-1], av_point)
         points_recovery = self.get_recovery(points_avoidance[-1], goal_pose)
 
 
@@ -125,68 +123,38 @@ class Planner:
         self._pub_plan.publish(path)
         self._need_plan = False
         
-    def get_side_step(self,rob_pose,hum_pose,goal_pose):
-        #virtual axis: a = new x (between robot and the goal, b=new y
-
-        a_goal = math.atan2(goal_pose.y-rob_pose.y,goal_pose.x-rob_pose.x)
-        a_human = math.atan2(hum_pose.y-rob_pose.y,hum_pose.x-rob_pose.x)
-
-        if (a_human-a_goal+math.pi)%(2*math.pi)-math.pi<0:
-            direction = math.pi/2
-            print "human is right"
-        else:
-            print "human is left"
-            direction = -math.pi/2
-
-        x=rob_pose.x
-        y=rob_pose.y
-        i=0
-
-        points=[]
-        
-        while self._grid[int(round(x,0))][int(round(y,0))]<5:
-            i+=1
-            x+=math.cos(a_goal+direction)
-            y+=math.sin(a_goal+direction)
-        d_b=i-self._rob_r/self._resolution
-        d_a=d_b/2
-        
+    def get_side_step(self,rob_pose,hum_pose):
         final_point = Pose2D()
-        final_point.x=rob_pose.x+d_a*math.cos(a_goal)+d_b*math.cos(a_goal+direction)
-        final_point.y=rob_pose.y+d_a*math.sin(a_goal)+d_b*math.sin(a_goal+direction)
+        final_point.x = rob_pose.x - .1/self._resolution
 
-        final_point.theta=rob_pose.theta
+        if hum_pose.y > rob_pose.y:
+            #human is on the right
+            for i in range(rob_pose.y,0,-1):
+                if self._grid[rob_pose.x][i]<MIN_TH:
+                    final_point.y = i + self._rob_r/self._resolution 
+                    break
+        else:
+            for i in range(rob_pose.y,self._width-1):
+                if self._grid[rob_pose.x][i]<MIN_TH:
+                    final_point.y =  i - self._rob_r/self._resolution
+                    break
 
+
+        points = []
+        final_point.theta = rob_pose.theta
         points.append(final_point)
         return points
 
-    def get_avoidance(self,rob_pose,hum_pose,goal_pose,last_step,av_point):
+    def get_avoidance(self,rob_pose,last_step,av_point):
         points=[]
-        a_goal = math.atan2(goal_pose.y-rob_pose.y,goal_pose.x-rob_pose.x)
-        a_human = math.atan2(hum_pose.y-rob_pose.y,hum_pose.x-rob_pose.x)
-
-        if (a_human-a_goal+math.pi)%(2*math.pi)-math.pi<0:
-            direction = math.pi/2
-            print "human is right"
-        else:
-            print "human is left"
-            direction = -math.pi/2
-        x=av_point.x
-        y=av_point.y
-        i=0
-
-        while self._grid[int(round(x,0))][int(round(y,0))]<5:
-            i+=1
-            x+=math.cos(a_goal+direction)
-            y+=math.sin(a_goal+direction)
-
-        d_b=i-self._rob_r/self._resolution
-
         final_point = Pose2D()
-        final_point.x=av_point.x+d_b*math.cos(a_goal+direction)
-        final_point.y=av_point.y+d_b*math.sin(a_goal+direction)
-
-        final_point.theta = direction - a_goal 
+        final_point.x = av_point.x
+        final_point.y = last_step.y
+        if rob_pose.y > last_step.y:
+            #robot goes left
+            final_point.theta = rob_pose.theta - math.pi/2
+        else:
+            final_point.theta = rob_pose.theta + math.pi/2
 
         points.append(final_point)
 

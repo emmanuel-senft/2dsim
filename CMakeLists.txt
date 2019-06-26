@@ -8,6 +8,12 @@ find_package(catkin REQUIRED COMPONENTS
         tf)
 
 ## System dependencies
+find_package(OpenCV REQUIRED)
+
+message(STATUS "OpenCV version: ${OpenCV_VERSION}")
+if(2.9.0 VERSION_GREATER ${OpenCV_VERSION})
+    message(FATAL "OpenCV3 required!")
+endif()
 
 ###################################
 ## catkin specific configuration ##
@@ -22,6 +28,7 @@ catkin_package(
 #  LIBRARIES ros_markers
   CATKIN_DEPENDS 
     tf
+  DEPENDS OpenCV
   LIBRARIES 
 )
 
@@ -36,7 +43,11 @@ add_definitions(-std=c++11)
 
 set(LIBS 
     ${catkin_LIBRARIES}
+    ${OpenCV_LIBRARIES}
     )
+
+add_executable(sandbox_map_and_plan src/map_and_plan.cpp)
+target_link_libraries(sandbox_map_and_plan ${LIBS})
 
 #add_library(markers_nodelet src/chilitagsdetector.cpp src/nodelet.cpp)
 #add_dependencies(markers_nodelet ${catkin_EXPORTED_TARGETS})
@@ -50,6 +61,13 @@ set(LIBS
 #############
 ## Install ##
 #############
+
+install(TARGETS
+    sandbox_map_and_plan
+   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
 
 install(DIRECTORY
     launch/

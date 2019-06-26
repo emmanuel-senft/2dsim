@@ -1,0 +1,17 @@
+<RCC>
+    <qresource prefix="/">
+        <file>main.qml</file>
+        <file>main.cpp</file>
+        <file>InteractiveItem.qml</file>
+        <file>RectangleBoxBody.qml</file>
+        <file>res/base_link.svg</file>
+        <file>TouchJoint.qml</file>
+        <file>res/human.svg</file>
+        <file>res/map.svg</file>
+        <file>res/cube_0.svg</file>
+        <file>res/cube_1.svg</file>
+        <file>res/cube_2.svg</file>
+        <file>res/cube_3.svg</file>
+        <file>res/goal.svg</file>
+    </qresource>
+</RCC>
