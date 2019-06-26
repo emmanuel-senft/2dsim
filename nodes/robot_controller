@@ -19,16 +19,27 @@ class Controller:
         self._pub = rospy.Subscriber("/plan", Path, queue_size=1)
         self._br = tf.TransformBroadcaster()
 
-        self._rob_x = -1.5
-        self._rob_y = -0.2
-        self._rob_theta = 0
+        self._rob_x = 3
+        self._rob_y = 0.85
+        self._rob_theta = math.pi
+
+        self._goal_x = 0
+        self._goal_y = 0.75
+        self._goal_theta = math.pi
         self._timer = None
+        self._timer2 = None
 
 
     def publish_robot_pose(self):
         self._br.sendTransform((self._rob_x,self._rob_y,0),tf.transformations.quaternion_from_euler(0, 0, self._rob_theta),rospy.Time.now(),"base_link","map")
         self._timer = threading.Timer(1./FREQ, self.publish_robot_pose)
         self._timer.start()
+
+    def publish_robot_goal(self):
+        self._br.sendTransform((self._goal_x,self._goal_y,0),tf.transformations.quaternion_from_euler(0, 0, self._goal_theta),rospy.Time.now(),"goal","map")
+        self._timer2 = threading.Timer(1./FREQ, self.publish_robot_goal)
+        self._timer2.start()
+
 
     def signal_handler(self, signal, frame):
         self._stopping = True
@@ -45,4 +56,5 @@ if __name__ == '__main__':
     signal.signal(signal.SIGINT, controller.signal_handler)
 
     controller.publish_robot_pose()
+    controller.publish_robot_goal()
     rospy.spin()

@@ -16,9 +16,9 @@ class Controller:
     def __init__(self):
         self._br = tf.TransformBroadcaster()
 
-        self._hum_x = 1.0
-        self._hum_y = 0
-        self._hum_theta = math.pi
+        self._hum_x = 0.5
+        self._hum_y = .8
+        self._hum_theta = 0
         self._timer = None
 
 

@@ -14,12 +14,14 @@ from tf.transformations import euler_from_quaternion,quaternion_about_axis
 tl=None
 
 REFERENCE_FRAME="map"
+MIN_TH = 5
 
 class Planner:
     def __init__(self):
         self._sub = rospy.Subscriber("/occupancy_grid", OccupancyGrid, self.on_map)
         self._pub_plan = rospy.Publisher("/plan", Path, queue_size=1)
-        self._pub_step = rospy.Publisher("/steps", PoseStamped, queue_size=1)
+        self._pub_av_p = rospy.Publisher("/avoidance_point", PoseStamped, queue_size=1)
+        self._br = tf.TransformBroadcaster()
         
 
         self._resolution = None
@@ -34,6 +36,7 @@ class Planner:
         self._rob_theta = None
         self._rob_r = .25
         self._need_plan = True
+        self._grid = None
 
 
     def on_map(self,msg):
@@ -44,12 +47,12 @@ class Planner:
         self._origin_x = msg.info.origin.position.x
         self._origin_y = msg.info.origin.position.y
         
-        grid = numpy.ndarray((self._width,self._height),buffer=numpy.zeros((self._width, self._height), dtype=numpy.int),dtype=numpy.int)
+        self._grid = numpy.ndarray((self._width,self._height),buffer=numpy.zeros((self._width, self._height), dtype=numpy.int),dtype=numpy.int)
 
 
         for i in range(self._width):
             for j in range(self._height):
-                grid[i][j]=msg.data[j*self._width+i]
+                self._grid[i][j]=msg.data[j*self._width+i]
 
         self.plan()
     
@@ -64,6 +67,7 @@ class Planner:
 
     def pose2D_to_stamped(self,p):
         pose = PoseStamped()
+        pose.header.frame_id = REFERENCE_FRAME
         pose.pose.position.x=self._origin_x+p.x*self._resolution
         pose.pose.position.y=self._origin_y+p.y*self._resolution
         q=quaternion_about_axis(p.theta,(0,1,0))
@@ -76,36 +80,92 @@ class Planner:
     def plan(self):
         rob_pose = self.get_pose2D("base_link")
         hum_pose = self.get_pose2D("human")
-        goal_pose = hum_pose
+        goal_pose = self.get_pose2D("goal")
+        
+        av_point = Pose2D()
+        
+        av_point.x=rob_pose.x+(hum_pose.x - rob_pose.x)/2
+        av_point.y=rob_pose.y+(hum_pose.y - rob_pose.y)/2
+        av_point.theta = hum_pose.theta
 
-        print "h"
-        print hum_pose
-        print "r"
-        print rob_pose
+        av_pose_position = [av_point.x*self._resolution+self._origin_x, av_point.y*self._resolution+self._origin_y,0]
+        av_pose_rotation = quaternion_about_axis(hum_pose.theta,(0,1,0))
+
+        self._br.sendTransform(av_pose_position, av_pose_rotation,rospy.Time.now(),"avoidance_point","map")
+
 
         path = Path()
         path.header.frame_id="map"
         path.header.stamp = rospy.Time.now()+rospy.Duration.from_sec(1.)
 
-        points=[]
-        n_points = 10
+        points_step = self.get_side_step(rob_pose,hum_pose)
+        points_avoidance = self.get_avoidance(rob_pose, points_step[-1], av_point)
+        points_recovery = self.get_recovery(points_avoidance[-1], goal_pose)
+
+
+        points=[rob_pose]+points_step+points_avoidance+points_recovery
+
+        #n_points = 10
+        #for i in range(n_points):
+        #    p = Pose2D()
+        #    p.x=rob_pose.x+(goal_pose.x-rob_pose.x)*i/n_points
+        #    p.y=rob_pose.y+(goal_pose.y-rob_pose.y)*i/n_points
+        #    p.theta=rob_pose.theta+(goal_pose.theta-rob_pose.theta)*i/n_points
+        #    points.append(p)
+        
         dt=1.
-        for i in range(n_points):
-            p = Pose2D()
-            p.x=rob_pose.x+(goal_pose.x-rob_pose.x)*i/n_points
-            p.y=rob_pose.y+(goal_pose.y-rob_pose.y)*i/n_points
-            p.theta=rob_pose.theta+(goal_pose.theta-rob_pose.theta)*i/n_points
-            points.append(p)
         
         for i,p in enumerate(points):
             ps = self.pose2D_to_stamped(p)
-            ps.header.frame_id = REFERENCE_FRAME
             ps.header.stamp = rospy.Time(i * dt)
-            self._pub_step.publish(ps)
             path.poses.append(ps)
 
         self._pub_plan.publish(path)
         self._need_plan = False
+        
+    def get_side_step(self,rob_pose,hum_pose):
+        final_point = Pose2D()
+        final_point.x = rob_pose.x - .1/self._resolution
+
+        if hum_pose.y > rob_pose.y:
+            #human is on the right
+            for i in range(rob_pose.y,0,-1):
+                if self._grid[rob_pose.x][i]<MIN_TH:
+                    final_point.y = i + self._rob_r/self._resolution 
+                    break
+        else:
+            for i in range(rob_pose.y,self._width-1):
+                if self._grid[rob_pose.x][i]<MIN_TH:
+                    final_point.y =  i - self._rob_r/self._resolution
+                    break
+
+
+        points = []
+        final_point.theta = rob_pose.theta
+        points.append(final_point)
+        return points
+
+    def get_avoidance(self,rob_pose,last_step,av_point):
+        points=[]
+        final_point = Pose2D()
+        final_point.x = av_point.x
+        final_point.y = last_step.y
+        if rob_pose.y > last_step.y:
+            #robot goes left
+            final_point.theta = rob_pose.theta - math.pi/2
+        else:
+            final_point.theta = rob_pose.theta + math.pi/2
+
+        points.append(final_point)
+
+        return points
+
+    def get_recovery(self,last_av,goal_pose):
+        points=[]
+        points.append(goal_pose)
+        return points
+
+
 
 
 
