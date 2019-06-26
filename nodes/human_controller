@@ -1,0 +1,43 @@
+#! /usr/bin/env python
+ 
+import roslib
+import rospy
+import numpy
+import math
+import tf
+import signal, sys, threading
+import time
+
+
+tl=None
+FREQ=10
+
+class Controller:
+    def __init__(self):
+        self._br = tf.TransformBroadcaster()
+
+        self._hum_x = 1.0
+        self._hum_y = 0
+        self._hum_theta = math.pi
+        self._timer = None
+
+
+    def publish_human_pose(self):
+        self._br.sendTransform((self._hum_x,self._hum_y,0),tf.transformations.quaternion_from_euler(0, 0, self._hum_theta),rospy.Time.now(),"human","map")
+        self._timer = threading.Timer(1./FREQ, self.publish_human_pose)
+        self._timer.start()
+
+    def signal_handler(self, signal, frame):
+        self._stopping = True
+        sys.exit(0)
+
+if __name__ == '__main__':
+    rospy.init_node('human_controller')
+
+    tl=tf.TransformListener()
+
+    controller = Controller()
+    signal.signal(signal.SIGINT, controller.signal_handler)
+
+    controller.publish_human_pose()
+    rospy.spin()

@@ -1,0 +1,87 @@
+#! /usr/bin/env python
+ 
+import roslib
+import rospy
+import numpy
+import math
+import tf
+
+import signal, sys, threading
+import time
+
+
+from nav_msgs.msg import OccupancyGrid
+from tf.transformations import euler_from_quaternion
+
+REFERENCE_FRAME = "map"
+
+FREQ=10
+
+class GridPub:
+    def __init__(self):
+        self.pub = rospy.Publisher("/occupancy_grid", OccupancyGrid, queue_size=5, latch=True)
+        self._resolution = .05
+        self._width = int(3/self._resolution)
+        self._height = int(1.5/self._resolution)
+        self._corr_width = int(1/self._resolution)
+
+        self._origin_x = -self._width / 2 * self._resolution
+        self._origin_y = -self._height / 2 * self._resolution
+        self._timer=None
+        self.update_map()
+
+
+    def update_map(self):
+        tl.waitForTransform(REFERENCE_FRAME,"human", rospy.Time.now(), rospy.Duration((4.0)))
+        h_pose= tl.lookupTransform(REFERENCE_FRAME,"human",rospy.Time())
+        h_x = int(round((h_pose[0][0]-self._origin_x)/self._resolution,0))
+        h_y = int(round((h_pose[0][1]-self._origin_y)/self._resolution,0))
+        _,_,h_theta =  euler_from_quaternion(h_pose[1])
+        h_r=.3/self._resolution
+
+        grid_msg=OccupancyGrid()
+        grid_msg.info.resolution=self._resolution
+        grid_msg.info.width=self._width
+        grid_msg.info.height=self._height
+        grid_msg.data=range(self._width*self._height)
+        grid_msg.info.origin.position.x = -self._width / 2 * self._resolution
+        grid_msg.info.origin.position.y = -self._height / 2 * self._resolution
+
+        grid = numpy.ndarray((self._width,self._height),buffer=numpy.zeros((self._width, self._height), dtype=numpy.int), dtype=numpy.int)
+
+        
+        for i in range(self._width):
+            for j in range(self._height):
+                if math.fabs(self._height/2-j)<=self._corr_width/2:
+                    grid[i][j]=64
+                
+                else:
+                    grid[i][j]=0
+                if math.pow(i-h_x,2)+math.pow(j-h_y,2)<h_r*h_r:
+                    grid[i][j]=127
+
+
+        
+        for i in range(self._width):
+            for j in range(self._height):
+                grid_msg.data[j*self._width+i]=grid[i][j]
+        #print grid_msg.data
+        #for i in range(self._width*self._height):
+        #    grid_msg.data[i] = grid.flat[i]
+        
+        self.pub.publish(grid_msg)
+        self._timer = threading.Timer(1./FREQ, self.update_map)
+        self._timer.start()
+
+    
+    def signal_handler(self, signal, frame):
+        self._stopping = True
+        sys.exit(0)
+
+if __name__ == '__main__':
+    rospy.init_node('grip_pub')
+    tl=tf.TransformListener()
+    rospy.sleep(.5)
+    grid_pub = GridPub()
+    signal.signal(signal.SIGINT, grid_pub.signal_handler)
+    rospy.spin()

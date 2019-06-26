@@ -1,0 +1,122 @@
+#! /usr/bin/env python
+ 
+import roslib
+import rospy
+import numpy
+import math
+import tf
+
+from nav_msgs.msg import OccupancyGrid, Path
+from geometry_msgs.msg import Pose2D,PoseStamped
+
+from tf.transformations import euler_from_quaternion,quaternion_about_axis
+
+tl=None
+
+REFERENCE_FRAME="map"
+
+class Planner:
+    def __init__(self):
+        self._sub = rospy.Subscriber("/occupancy_grid", OccupancyGrid, self.on_map)
+        self._pub_plan = rospy.Publisher("/plan", Path, queue_size=1)
+        self._pub_step = rospy.Publisher("/steps", PoseStamped, queue_size=1)
+        
+
+        self._resolution = None
+        self._width = None
+        self._height = None
+        self._map = None
+        self._origin_x = None
+        self._origin_y = None
+
+        self._rob_x = None
+        self._rob_y = None
+        self._rob_theta = None
+        self._rob_r = .25
+        self._need_plan = True
+
+
+    def on_map(self,msg):
+        self._resolution = msg.info.resolution
+        self._width = msg.info.width
+        self._height = msg.info.height
+
+        self._origin_x = msg.info.origin.position.x
+        self._origin_y = msg.info.origin.position.y
+        
+        grid = numpy.ndarray((self._width,self._height),buffer=numpy.zeros((self._width, self._height), dtype=numpy.int),dtype=numpy.int)
+
+
+        for i in range(self._width):
+            for j in range(self._height):
+                grid[i][j]=msg.data[j*self._width+i]
+
+        self.plan()
+    
+    def get_pose2D(self, frame_id):
+        tl.waitForTransform(REFERENCE_FRAME,frame_id, rospy.Time.now(), rospy.Duration((4.0)))
+        pose= tl.lookupTransform(REFERENCE_FRAME,frame_id,rospy.Time())
+        x = int(round((pose[0][0]-self._origin_x)/self._resolution,0))
+        y = int(round((pose[0][1]-self._origin_y)/self._resolution,0))
+        _,_,theta =  euler_from_quaternion(pose[1])
+        pose = Pose2D(x,y,theta)
+        return pose
+
+    def pose2D_to_stamped(self,p):
+        pose = PoseStamped()
+        pose.pose.position.x=self._origin_x+p.x*self._resolution
+        pose.pose.position.y=self._origin_y+p.y*self._resolution
+        q=quaternion_about_axis(p.theta,(0,1,0))
+        pose.pose.orientation.x=q[0]
+        pose.pose.orientation.y=q[1]
+        pose.pose.orientation.z=q[2]
+        pose.pose.orientation.x=q[3]
+        return pose
+
+    def plan(self):
+        rob_pose = self.get_pose2D("base_link")
+        hum_pose = self.get_pose2D("human")
+        goal_pose = hum_pose
+
+        print "h"
+        print hum_pose
+        print "r"
+        print rob_pose
+
+        path = Path()
+        path.header.frame_id="map"
+        path.header.stamp = rospy.Time.now()+rospy.Duration.from_sec(1.)
+
+        points=[]
+        n_points = 10
+        dt=1.
+        for i in range(n_points):
+            p = Pose2D()
+            p.x=rob_pose.x+(goal_pose.x-rob_pose.x)*i/n_points
+            p.y=rob_pose.y+(goal_pose.y-rob_pose.y)*i/n_points
+            p.theta=rob_pose.theta+(goal_pose.theta-rob_pose.theta)*i/n_points
+            points.append(p)
+        
+        for i,p in enumerate(points):
+            ps = self.pose2D_to_stamped(p)
+            ps.header.frame_id = REFERENCE_FRAME
+            ps.header.stamp = rospy.Time(i * dt)
+            self._pub_step.publish(ps)
+            path.poses.append(ps)
+
+        self._pub_plan.publish(path)
+        self._need_plan = False
+
+
+
+
+
+if __name__ == '__main__':
+    rospy.init_node('planner')
+
+    tl=tf.TransformListener()
+    rospy.sleep(.5)
+
+
+    planner = Planner()
+    rospy.spin()

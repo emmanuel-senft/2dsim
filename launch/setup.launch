@@ -1,0 +1,7 @@
+<launch>
+  <arg name="model" default="$(find 2dsim)/urdf/base.urdf"/>
+  <arg name="gui" default="true" />
+  <arg name="rvizconfig" default="$(find 2dsim)/config/default.rviz" />
+  <param name="use_gui" value="$(arg gui)"/>
+  <node name="rviz" pkg="rviz" type="rviz" args="-d $(arg rvizconfig)" required="true" />
+</launch>
