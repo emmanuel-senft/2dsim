@@ -22,7 +22,6 @@ catkin_package(
 #  LIBRARIES ros_markers
   CATKIN_DEPENDS 
     tf
-    nodelet
   LIBRARIES 
 )
 
